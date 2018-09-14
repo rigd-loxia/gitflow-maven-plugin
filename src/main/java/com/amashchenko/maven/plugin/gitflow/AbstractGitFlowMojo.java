@@ -15,13 +15,20 @@
  */
 package com.amashchenko.maven.plugin.gitflow;
 
+import static java.util.Arrays.asList;
+
+import java.io.File;
 import java.io.FileReader;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.regex.Pattern;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.maven.artifact.ArtifactUtils;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.model.Dependency;
@@ -34,6 +41,7 @@ import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.settings.Settings;
 import org.codehaus.plexus.components.interactivity.Prompter;
+import org.codehaus.plexus.util.Os;
 import org.codehaus.plexus.util.StringUtils;
 import org.codehaus.plexus.util.cli.CommandLineException;
 import org.codehaus.plexus.util.cli.CommandLineUtils;
@@ -153,12 +161,19 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
     /** Maven settings. */
     @Parameter(defaultValue = "${settings}", readonly = true)
     protected Settings settings;
+    /** git user */
+    @Parameter(property = "git.user", defaultValue = "${git.user}", readonly = true)
+    private String gitUser;
+    /** git password */
+    @Parameter(property = "git.password", defaultValue = "${git.password}", readonly = true)
+    private String gitPassword;
+	private File echoPass;
 
     /**
      * Initializes command line executables.
      * 
      */
-    private void initExecutables() {
+    private void initExecutables() throws MojoFailureException {
         if (StringUtils.isBlank(cmdMvn.getExecutable())) {
             if (StringUtils.isBlank(mvnExecutable)) {
                 mvnExecutable = "mvn";
@@ -173,6 +188,51 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
         }
     }
 
+	private void initGitCredentials() throws MojoFailureException {
+		if (useGitAskPass()) {
+            try {
+		        if (Os.isFamily(Os.FAMILY_WINDOWS)) {
+		        	echoPass = createGitAskPassFileForWindows();
+		        } else if (Os.isFamily(Os.FAMILY_UNIX)) {
+		        	echoPass = createGitAskPassFileForUnix();
+		        }
+				echoPass.setExecutable(true);
+				cmdGit.addEnvironment("GIT_ASKPASS", echoPass.getAbsolutePath());
+			} catch (IOException e) {
+				echoPass.delete();
+				throw new MojoFailureException("Unable to create temporary file for GIT_ASKPASS routine.");
+			}
+        }
+	}
+
+	private File createGitAskPassFileForWindows() throws IOException {
+		File echoPassFile = File.createTempFile("askpass", ".bat");
+		String echoFileContents = "@echo off\r\n"
+				+ "echo 1:%1 >> request.txt\r\n"
+				+ "echo %1 | findstr /c:Username 1>nul\r\n"
+				+ "IF NOT errorlevel 1 echo "+gitUser+"\r\n"
+				+ "echo %1 | findstr /c:Password 1>nul\r\n"
+				+ "IF NOT errorlevel 1 echo "+gitPassword+"\r\n"
+				;
+		Files.write(echoPassFile.toPath(), echoFileContents.getBytes(), StandardOpenOption.WRITE);
+		return echoPassFile;
+	}
+
+	private File createGitAskPassFileForUnix() throws IOException {
+		File echoPassFile = File.createTempFile("askpass", ".sh");
+		Files.write(echoPassFile.toPath(), ("case \"$1\" in\r\n" + 
+				"Username*) echo "+gitUser+" ;;\r\n" + 
+				"Password*) echo "+gitPassword+" ;;\r\n" + 
+				"esac").getBytes(), StandardOpenOption.WRITE);
+		return echoPassFile;
+	}
+
+	private void cleanupGitCredentials() {
+        if (useGitAskPass()) {
+        	echoPass.delete();
+        }
+    }
+    
     /**
      * Validates plugin configuration. Throws exception if configuration is not
      * valid.
@@ -198,6 +258,10 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
                 }
             }
         }
+
+		if (useGitAskPass()) {
+            getLog().info("using GIT_ASKPASS to set credentials");
+		}
     }
 
     /**
@@ -947,7 +1011,12 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
      */
     private String executeGitCommandReturn(final String... args)
             throws CommandLineException, MojoFailureException {
-        return executeCommand(cmdGit, true, null, args).getOut();
+    	try {
+    		initGitCredentials();
+    		return executeCommand(cmdGit, true, null, addAskPassArguments(args)).getOut();
+    	}finally {
+    		cleanupGitCredentials();
+    	}
     }
 
     /**
@@ -961,7 +1030,12 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
      */
     private CommandResult executeGitCommandExitCode(final String... args)
             throws CommandLineException, MojoFailureException {
-        return executeCommand(cmdGit, false, null, args);
+    	try {
+    		initGitCredentials();
+    		return executeCommand(cmdGit, false, null, addAskPassArguments(args));
+    	}finally {
+    		cleanupGitCredentials();
+    	}
     }
 
     /**
@@ -974,8 +1048,28 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
      */
     private void executeGitCommand(final String... args)
             throws CommandLineException, MojoFailureException {
-        executeCommand(cmdGit, true, null, args);
+    	try {
+    		initGitCredentials();
+    		executeCommand(cmdGit, true, null, addAskPassArguments(args));
+    	}finally {
+    		cleanupGitCredentials();
+    	}
     }
+
+	private String[] addAskPassArguments(final String... args) {
+		if (useGitAskPass()) {
+    		List<String> newArgs = new ArrayList<String>();
+    		newArgs.add("-c");
+    		newArgs.add("core.askpass=true");
+    		newArgs.addAll(asList(args));
+    		return newArgs.toArray(new String[0]);
+    	}
+		return args;
+	}
+
+	private boolean useGitAskPass() {
+		return StringUtils.isNotBlank(gitPassword);
+	}
 
     /**
      * Executes Maven command.
