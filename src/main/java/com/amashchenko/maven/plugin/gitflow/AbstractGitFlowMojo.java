@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.commons.io.FileUtils;
@@ -169,6 +170,17 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
     private String gitPassword;
 	private File echoPass;
 
+	private boolean settingsInitialized = false;
+	private void initSettingsXml() {
+		if (!settingsInitialized) {
+			Pattern settingsLocation = Pattern.compile("\\s((?:-s|--settings)\\s(?:\"[^\"]*\"]|\\S+))");
+			Matcher settingsLocationMatcher = settingsLocation.matcher(System.getProperty("sun.java.command"));
+			if (settingsLocationMatcher.find()) {
+				argLine = argLine+" "+settingsLocationMatcher.group(1);
+			}
+		}
+	}
+	
     /**
      * Initializes command line executables.
      * 
@@ -1081,6 +1093,9 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
      */
     private void executeMvnCommand(final String... args)
             throws CommandLineException, MojoFailureException {
+        // initialize settings xml location
+        initSettingsXml();
+        
         executeCommand(cmdMvn, true, argLine, args);
     }
 
@@ -1108,7 +1123,7 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
             MojoFailureException {
         // initialize executables
         initExecutables();
-
+        
         if (getLog().isDebugEnabled()) {
             getLog().debug(
                     cmd.getExecutable() + " " + StringUtils.join(args, " ")
