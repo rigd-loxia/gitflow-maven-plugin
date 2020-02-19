@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2018 Aleksandr Mashchenko.
+ * Copyright 2014-2019 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ import org.codehaus.plexus.util.cli.CommandLineException;
 
 /**
  * The git flow hotfix finish mojo.
- * 
+ *
  */
 @Mojo(name = "hotfix-finish", aggregator = true)
 public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
@@ -47,7 +47,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
     /**
      * Whether to skip calling Maven test goal before merging the branch.
-     * 
+     *
      * @since 1.0.5
      */
     @Parameter(property = "skipTestProject", defaultValue = "false")
@@ -55,7 +55,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
     /**
      * Whether to push to the remote.
-     * 
+     *
      * @since 1.3.0
      */
     @Parameter(property = "pushRemote", defaultValue = "true")
@@ -64,7 +64,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
     /**
      * Maven goals to execute in the hotfix branch before merging into the
      * production or support branch.
-     * 
+     *
      * @since 1.8.0
      */
     @Parameter(property = "preHotfixGoals")
@@ -72,7 +72,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
     /**
      * Maven goals to execute in the release or support branch after the hotfix.
-     * 
+     *
      * @since 1.8.0
      */
     @Parameter(property = "postHotfixGoals")
@@ -80,7 +80,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
     /**
      * Hotfix version to use in non-interactive mode.
-     * 
+     *
      * @since 1.9.0
      */
     @Parameter(property = "hotfixVersion")
@@ -88,20 +88,36 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
     /**
      * Whether to make a GPG-signed tag.
-     * 
+     *
      * @since 1.9.0
      */
     @Parameter(property = "gpgSignTag", defaultValue = "false")
     private boolean gpgSignTag = false;
 
     /**
-     * Whether this is use snapshot in hotfix.
-     * 
+     * Whether to use snapshot in hotfix.
+     *
      * @since 1.10.0
      */
-    @Parameter(defaultValue = "false")
-    protected boolean useSnapshotInHotfix;
-    
+    @Parameter(property = "useSnapshotInHotfix", defaultValue = "false")
+    private boolean useSnapshotInHotfix;
+
+    /**
+     * Whether to skip merging into the production branch.
+     *
+     * @since 1.12.0
+     */
+    @Parameter(property = "skipMergeProdBranch", defaultValue = "false")
+    private boolean skipMergeProdBranch = false;
+
+    /**
+     * Whether to skip merging into the development branch.
+     *
+     * @since 1.12.0
+     */
+    @Parameter(property = "skipMergeDevBranch", defaultValue = "false")
+    private boolean skipMergeDevBranch = false;
+
     /** {@inheritDoc} */
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
@@ -159,42 +175,44 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
                 }
             }
 
-            if (!skipTestProject) {
-                // git checkout hotfix/...
-                gitCheckout(hotfixBranchName);
+            // git checkout hotfix/...
+            gitCheckout(hotfixBranchName);
 
+            if (!skipTestProject) {
                 // mvn clean test
                 mvnCleanTest();
             }
 
             // maven goals before merge
             if (StringUtils.isNotBlank(preHotfixGoals)) {
-                gitCheckout(hotfixBranchName);
-
                 mvnRun(preHotfixGoals);
             }
 
             String currentHotfixVersion = getCurrentProjectVersion();
+
+            Map<String, String> messageProperties = new HashMap<String, String>();
+            messageProperties.put("version", currentHotfixVersion);
+
             if (useSnapshotInHotfix && ArtifactUtils.isSnapshot(currentHotfixVersion)) {
                 String commitVersion = currentHotfixVersion.replace("-" + Artifact.SNAPSHOT_VERSION, "");
 
                 mvnSetVersions(commitVersion);
 
-                Map<String, String> properties = new HashMap<String, String>();
-                properties.put("version", commitVersion);
+                messageProperties.put("version", commitVersion);
 
-                gitCommit(commitMessages.getHotfixStartMessage(), properties);
+                gitCommit(commitMessages.getHotfixFinishMessage(), messageProperties);
             }
 
             if (supportBranchName != null) {
                 gitCheckout(supportBranchName);
-            } else {
+                // git merge --no-ff hotfix/...
+                gitMergeNoff(hotfixBranchName, commitMessages.getHotfixFinishSupportMergeMessage(), messageProperties);
+            } else if (!skipMergeProdBranch) {
                 // git checkout master
                 gitCheckout(gitFlowConfig.getProductionBranch());
+                // git merge --no-ff hotfix/...
+                gitMergeNoff(hotfixBranchName, commitMessages.getHotfixFinishMergeMessage(), messageProperties);
             }
-
-            // git merge --no-ff hotfix/...
-            gitMergeNoff(hotfixBranchName);
 
             final String currentVersion = getCurrentProjectVersion();
 
@@ -213,6 +231,11 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
                         commitMessages.getTagHotfixMessage(), gpgSignTag, properties);
             }
 
+            if (skipMergeProdBranch && (supportBranchName == null)) {
+                // switch to production branch so hotfix branch can be deleted
+                gitCheckout(gitFlowConfig.getProductionBranch());
+            }
+
             // maven goals after merge
             if (StringUtils.isNotBlank(postHotfixGoals)) {
                 mvnRun(postHotfixGoals);
@@ -229,9 +252,25 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
                 if (StringUtils.isNotBlank(releaseBranch)) {
                     // git checkout release
                     gitCheckout(releaseBranch);
+                    String releaseBranchVersion = getCurrentProjectVersion();
+
+                    if (!currentVersion.equals(releaseBranchVersion)) {
+                        // set version to avoid merge conflict
+                        mvnSetVersions(currentVersion);
+                        gitCommit(commitMessages.getUpdateReleaseToAvoidConflictsMessage());
+                    }
+
+                    messageProperties.put("version", currentVersion);
+
                     // git merge --no-ff hotfix/...
-                    gitMergeNoff(hotfixBranchName);
-                } else {
+                    gitMergeNoff(hotfixBranchName, commitMessages.getHotfixFinishReleaseMergeMessage(),
+                            messageProperties);
+
+                    if (!currentVersion.equals(releaseBranchVersion)) {
+                        mvnSetVersions(releaseBranchVersion);
+                        gitCommit(commitMessages.getUpdateReleaseBackPreMergeStateMessage());
+                    }
+                } else if (!skipMergeDevBranch) {
                     GitFlowVersionInfo developVersionInfo = new GitFlowVersionInfo(
                             currentVersion);
                     if (notSameProdDevName()) {
@@ -242,10 +281,13 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
                         // set version to avoid merge conflict
                         mvnSetVersions(currentVersion);
-                        gitCommit("update to hotfix version");
+                        gitCommit(commitMessages.getHotfixVersionUpdateMessage());
+
+                        messageProperties.put("version", currentVersion);
 
                         // git merge --no-ff hotfix/...
-                        gitMergeNoff(hotfixBranchName);
+                        gitMergeNoff(hotfixBranchName, commitMessages.getHotfixFinishDevMergeMessage(),
+                                messageProperties);
 
                         // which version to increment
                         GitFlowVersionInfo hotfixVersionInfo = new GitFlowVersionInfo(
@@ -257,7 +299,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
                     }
 
                     // get next snapshot version
-                    final String nextSnapshotVersion = developVersionInfo.getSnapshotVersionString();
+                    final String nextSnapshotVersion = developVersionInfo.nextSnapshotVersion();
 
                     if (StringUtils.isBlank(nextSnapshotVersion)) {
                         throw new MojoFailureException(
@@ -288,9 +330,10 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
                 } else {
                     gitPush(gitFlowConfig.getProductionBranch(), !skipTag);
 
-                    // if no release branch
-                    if (StringUtils.isBlank(releaseBranch)
-                            && notSameProdDevName()) {
+                    if (StringUtils.isNotBlank(releaseBranch)) {
+                        gitPush(releaseBranch, !skipTag);
+                    } else if (StringUtils.isBlank(releaseBranch)
+                            && notSameProdDevName()) { // if no release branch
                         gitPush(gitFlowConfig.getDevelopmentBranch(), !skipTag);
                     }
                 }
@@ -301,8 +344,13 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
             }
 
             if (!keepBranch) {
-                // git branch -d hotfix/...
-                gitBranchDelete(hotfixBranchName);
+                if (skipMergeProdBranch){
+                    //force delete as upstream merge is skipped
+                    gitBranchDeleteForce(hotfixBranchName);
+                } else {
+                    // git branch -d hotfix/...
+                    gitBranchDelete(hotfixBranchName);
+                }
             }
         } catch (Exception e) {
             throw new MojoFailureException("hotfix-finish", e);
