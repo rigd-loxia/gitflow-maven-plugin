@@ -1267,7 +1267,13 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
         }
 
         cmd.clearArgs();
-        cmd.addArguments(args);
+        List<String> usableArgs = new ArrayList<String>();
+        for (String arg : args) {
+            if (!StringUtils.isBlank(arg)) {
+                usableArgs.add(arg);
+            }
+        }
+        cmd.addArguments(usableArgs.toArray(new String[0]));
 
         if (StringUtils.isNotBlank(argStr)) {
             cmd.createArg().setLine(argStr);
