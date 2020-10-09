@@ -263,9 +263,9 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
 
 	private File createGitAskPassFileForUnix() throws IOException {
 		File echoPassFile = File.createTempFile("askpass", ".sh");
-		Files.write(echoPassFile.toPath(), ("case \"$1\" in\r\n" + 
-				"Username*) echo "+gitUser+" ;;\r\n" + 
-				"Password*) echo "+gitPassword+" ;;\r\n" + 
+		Files.write(echoPassFile.toPath(), ("case \"$1\" in\n" + 
+				"Username*) echo "+gitUser+" ;;\n" + 
+				"Password*) echo "+gitPassword+" ;;\n" + 
 				"esac").getBytes(), StandardOpenOption.WRITE);
 		return echoPassFile;
 	}
