@@ -159,6 +159,14 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
     @Parameter(property = "useSnapshotInRelease", defaultValue = "false")
     private boolean useSnapshotInRelease;
 
+    /**
+     * Whether to skip merging release into the production branch.
+     *
+     * @since 1.15.0
+     */
+    @Parameter(property = "skipReleaseMergeProdBranch", defaultValue = "false")
+    private boolean skipReleaseMergeProdBranch = false;
+
     /** {@inheritDoc} */
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
@@ -252,11 +260,13 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
                 gitCommit(commitMessages.getReleaseFinishMessage(), messageProperties);
             }
 
-            // git checkout master
-            gitCheckout(gitFlowConfig.getProductionBranch());
+            if (!skipReleaseMergeProdBranch) {
+                // git checkout master
+                gitCheckout(gitFlowConfig.getProductionBranch());
 
-            gitMerge(releaseBranch, releaseRebase, releaseMergeNoFF, releaseMergeFFOnly,
-                    commitMessages.getReleaseFinishMergeMessage(), messageProperties);
+                gitMerge(releaseBranch, releaseRebase, releaseMergeNoFF, releaseMergeFFOnly, commitMessages.getReleaseFinishMergeMessage(),
+                        messageProperties);
+            }
 
             // get current project version from pom
             final String currentVersion = getCurrentProjectVersion();
@@ -309,7 +319,8 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
 
             if (commitDevelopmentVersionAtStart && !notSameProdDevName()) {
                 getLog().warn(
-                        "The commitDevelopmentVersionAtStart will not have effect. It can be enabled only when there are separate branches for development and production.");
+                        "The commitDevelopmentVersionAtStart will not have effect. "
+                                + "It can be enabled only when there are separate branches for development and production.");
                 commitDevelopmentVersionAtStart = false;
             }
 
