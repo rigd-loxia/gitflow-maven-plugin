@@ -211,17 +211,16 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
 			}
 		}
 	}
-	
+
     /**
      * Initializes command line executables.
-     * 
      */
     private void initExecutables() throws MojoFailureException {
         if (StringUtils.isBlank(cmdMvn.getExecutable())) {
             if (StringUtils.isBlank(mvnExecutable)) {
                 mvnExecutable = "mvn";
             }
-            cmdMvn.setExecutable(mvnExecutable);
+            cmdMvn.setExecutable(correctForWindowsIfNeeded(mvnExecutable, ".cmd"));
         }
         if (StringUtils.isBlank(cmdGit.getExecutable())) {
             if (StringUtils.isBlank(gitExecutable)) {
@@ -229,6 +228,13 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
             }
             cmdGit.setExecutable(gitExecutable);
         }
+    }
+
+    private String correctForWindowsIfNeeded(String mvnExecutable, String windowsExtension) {
+        if (Os.isFamily(Os.FAMILY_WINDOWS) && !mvnExecutable.endsWith(windowsExtension)) {
+            return mvnExecutable + windowsExtension;
+        }
+        return mvnExecutable;
     }
 
 	private void initGitCredentials() throws MojoFailureException {
