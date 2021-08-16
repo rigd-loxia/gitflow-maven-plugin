@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2020 Aleksandr Mashchenko.
+ * Copyright 2014-2021 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -87,6 +87,16 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
     private String hotfixVersion;
 
     /**
+     * Hotfix branch to use in non-interactive mode. Must start with hotfix branch
+     * prefix. The hotfixBranch parameter will be used instead of
+     * {@link #hotfixVersion} if both are set.
+     *
+     * @since 1.16.0
+     */
+    @Parameter(property = "hotfixBranch")
+    private String hotfixBranch;
+
+    /**
      * Whether to make a GPG-signed tag.
      *
      * @since 1.9.0
@@ -130,13 +140,18 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
             String hotfixBranchName = null;
             if (settings.isInteractiveMode()) {
                 hotfixBranchName = promptBranchName();
+            } else if (StringUtils.isNotBlank(hotfixBranch)) {
+                if (!hotfixBranch.startsWith(gitFlowConfig.getHotfixBranchPrefix())) {
+                    throw new MojoFailureException("The hotfixBranch parameter doesn't start with hotfix branch prefix.");
+                }
+                if (!gitCheckBranchExists(hotfixBranch)) {
+                    throw new MojoFailureException("Hotfix branch with name '" + hotfixBranch + "' doesn't exist. Cannot finish hotfix.");
+                }
+                hotfixBranchName = hotfixBranch;
             } else if (StringUtils.isNotBlank(hotfixVersion)) {
-                final String branch = gitFlowConfig.getHotfixBranchPrefix()
-                        + hotfixVersion;
+                final String branch = gitFlowConfig.getHotfixBranchPrefix() + hotfixVersion;
                 if (!gitCheckBranchExists(branch)) {
-                    throw new MojoFailureException(
-                            "Hotfix branch with name '" + branch
-                                    + "' doesn't exist. Cannot finish hotfix.");
+                    throw new MojoFailureException("Hotfix branch with name '" + branch + "' doesn't exist. Cannot finish hotfix.");
                 }
                 hotfixBranchName = branch;
             }
@@ -300,7 +315,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
                     }
 
                     // get next snapshot version
-                    final String nextSnapshotVersion = developVersionInfo.nextSnapshotVersion();
+                    final String nextSnapshotVersion = developVersionInfo.getSnapshotVersionString();
 
                     if (StringUtils.isBlank(nextSnapshotVersion)) {
                         throw new MojoFailureException(

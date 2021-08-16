@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2020 Aleksandr Mashchenko.
+ * Copyright 2014-2021 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,6 +55,8 @@ public class CommitMessages {
     private String updateFeatureBackMessage;
     private String featureFinishIncrementVersionMessage;
 
+    private String supportStartMessage;
+
     public CommitMessages() {
         featureStartMessage = "Update versions for feature branch";
         featureFinishMessage = "Update versions for development branch";
@@ -83,6 +85,8 @@ public class CommitMessages {
 
         updateFeatureBackMessage = "Update feature branch back to feature version";
         featureFinishIncrementVersionMessage = "Increment feature version";
+
+        supportStartMessage = "Update versions for support branch";
     }
 
     /**
@@ -267,16 +271,6 @@ public class CommitMessages {
     }
 
     /**
-     * @param updateDevToAvoidConflitsMessage
-     *            the updateDevToAvoidConflitsMessage to set
-     * @deprecated Use the correctly spelt updateDevToAvoidConflictsMessage instead
-     */
-    @Deprecated
-    public void setUpdateDevToAvoidConflitsMessage(String updateDevToAvoidConflitsMessage) {
-        this.updateDevToAvoidConflictsMessage = updateDevToAvoidConflitsMessage;
-    }
-
-    /**
      * @return the updateDevBackPreMergeStateMessage
      */
     public String getUpdateDevBackPreMergeStateMessage() {
@@ -422,5 +416,20 @@ public class CommitMessages {
      */
     public void setFeatureFinishIncrementVersionMessage(String featureFinishIncrementVersionMessage) {
         this.featureFinishIncrementVersionMessage = featureFinishIncrementVersionMessage;
+    }
+
+    /**
+     * @return the supportStartMessage
+     */
+    public String getSupportStartMessage() {
+        return supportStartMessage;
+    }
+
+    /**
+     * @param supportStartMessage
+     *            the supportStartMessage to set
+     */
+    public void setSupportStartMessage(String supportStartMessage) {
+        this.supportStartMessage = supportStartMessage;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2020 Aleksandr Mashchenko.
+ * Copyright 2014-2021 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,14 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -59,6 +63,8 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
     private static final String VERSIONS_MAVEN_PLUGIN_SET_PROPERTY_GOAL = "org.codehaus.mojo:versions-maven-plugin:set-property";
     /** Name of the tycho-versions-plugin set-version goal. */
     private static final String TYCHO_VERSIONS_PLUGIN_SET_GOAL = "org.eclipse.tycho:tycho-versions-plugin:set-version";
+    /** Name of the property needed to have reproducible builds. */
+    private static final String REPRODUCIBLE_BUILDS_PROPERTY = "project.build.outputTimestamp";
 
     /** System line separator. */
     protected static final String LS = System.getProperty("line.separator");
@@ -326,6 +332,18 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
                     "Cannot get current project version. This plugin should be executed from the parent project.");
         }
         return reloadedProject.getVersion();
+    }
+
+    /**
+     * Gets current project {@link #REPRODUCIBLE_BUILDS_PROPERTY} property value
+     * from pom.xml file.
+     * 
+     * @return Value of {@link #REPRODUCIBLE_BUILDS_PROPERTY} property.
+     * @throws MojoFailureException
+     */
+    private String getCurrentProjectOutputTimestamp() throws MojoFailureException {
+        final MavenProject reloadedProject = reloadProject(mavenSession.getCurrentProject());
+        return reloadedProject.getProperties().getProperty(REPRODUCIBLE_BUILDS_PROPERTY);
     }
 
     /**
@@ -1100,15 +1118,44 @@ public abstract class AbstractGitFlowMojo extends AbstractMojo {
 
             executeMvnCommand(TYCHO_VERSIONS_PLUGIN_SET_GOAL, prop, newVersion, "-Dtycho.mode=maven");
         } else {
+            boolean runCommand = false;
+            List<String> args = new ArrayList<>();
+            args.add("-DgenerateBackupPoms=false");
+            args.add(newVersion);
             if (!skipUpdateVersion) {
-                executeMvnCommand(VERSIONS_MAVEN_PLUGIN_SET_GOAL, grp, art, newVersion, "-DgenerateBackupPoms=false");
+                runCommand = true;
+                args.add(VERSIONS_MAVEN_PLUGIN_SET_GOAL);
+                args.add(grp);
+                args.add(art);
             }
 
             if (StringUtils.isNotBlank(versionProperty)) {
+                runCommand = true;
                 getLog().info("Updating property '" + versionProperty + "' to '" + version + "'.");
 
-                executeMvnCommand(VERSIONS_MAVEN_PLUGIN_SET_PROPERTY_GOAL, newVersion, "-Dproperty=" + versionProperty,
-                        "-DgenerateBackupPoms=false");
+                args.add(VERSIONS_MAVEN_PLUGIN_SET_PROPERTY_GOAL);
+                args.add("-Dproperty=" + versionProperty);
+            }
+            if (runCommand) {
+                executeMvnCommand(args.toArray(new String[0]));
+
+                String timestamp = getCurrentProjectOutputTimestamp();
+                if (timestamp != null && timestamp.length() > 1) {
+                    if (StringUtils.isNumeric(timestamp)) {
+                        // int representing seconds since the epoch
+                        timestamp = String.valueOf(System.currentTimeMillis() / 1000l);
+                    } else {
+                        // ISO-8601
+                        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
+                        df.setTimeZone(TimeZone.getTimeZone("UTC"));
+                        timestamp = df.format(new Date());
+        }
+
+                    getLog().info("Updating property '" + REPRODUCIBLE_BUILDS_PROPERTY + "' to '" + timestamp + "'.");
+
+                    executeMvnCommand(VERSIONS_MAVEN_PLUGIN_SET_PROPERTY_GOAL, "-DgenerateBackupPoms=false",
+                            "-Dproperty=" + REPRODUCIBLE_BUILDS_PROPERTY, "-DnewVersion=" + timestamp);
+    }
             }
         }
     }
