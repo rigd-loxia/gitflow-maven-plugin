@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.19.0 (2022-10-13)
+
+* Fixed snapshot checking with up-to-date project info - [#345](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/345)
+* Improved remote branch fetching comparing and checking out
+* Added ability to update git submodules before commit - [#348](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/348)
+* Added tag push on hotfix if it isn't pushed with the branch - [#349](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/349)
+* Added fetching of remote release branch on hotfix-finish goal - [#318](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/318)
+* Added more logs for verbose mode - [#331](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/331)
+
+## v1.18.0 (2022-02-20)
+
+### Breaking changes
+
+* Changed default branch to merge during release. Now tag or production branch will be merged to development branch. To restore previous behavior and merge release branch use `noBackMerge` parameter - [#213](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/213)
+* Changed default branch to merger during hotfix. Now tag or production branch will be merged to development branch. To restore previous behavior and merge hotfix branch use `noBackMergeHotfix` parameter - [#328](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/328)
+* Changed default versions of internal plugins `versions-maven-plugin` and `tycho-versions-plugin`. Now it is set in the code and can be modified with properties - [#330](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/330)
+
+### ---
+
+* Added new `version-update` goal - [#269](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/269)
+* Improved getting current version of the project - [#324](https://github.com/aleksandr-m/gitflow-maven-plugin/pull/324)
+* Added check for SNAPSHOT dependency in parent project definition - [#64](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/64)
+* Added ability to use [Maven version policy](https://maven.apache.org/maven-release/maven-release-api/apidocs/org/apache/maven/shared/release/policy/version/VersionPolicy.html) - [#235](https://github.com/aleksandr-m/gitflow-maven-plugin/pull/236)
+* Added checkout from remote for development branch in `feature-start` goal - [#322](https://github.com/aleksandr-m/gitflow-maven-plugin/pull/322)
+* Added ability to add [push-options](https://git-scm.com/docs/git-push#Documentation/git-push.txt--oltoptiongt) to git push - [#319](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/319)
+
+## v1.17.0 (2021-12-07)
+
+* Fixed and improved error messages in `feature-start` goal - [#306](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/306)
+* Added ability to use different commit message on feature squash - [#287](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/287)
+* Added ability to increment different digit in hotfix version - [#186](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/186)
+* Added ability to disable update of `project.build.outputTimestamp` property - [#310](https://github.com/aleksandr-m/gitflow-maven-plugin/pull/310)
+* Added support to automatically use Maven wrapper for internal commands - [#246](https://github.com/aleksandr-m/gitflow-maven-plugin/pull/246)
+* Added ability to use `gitFlowConfig` and `commitMessages` properties from the command line - [#284](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/284)
+
 ## v1.16.0 (2021-03-23)
 
 * Fixed wrong incrementing of feature name - [#288](https://github.com/aleksandr-m/gitflow-maven-plugin/issues/288)

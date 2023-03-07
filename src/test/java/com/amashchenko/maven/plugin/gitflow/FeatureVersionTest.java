@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2021 Aleksandr Mashchenko.
+ * Copyright 2014-2023 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,6 +51,6 @@ public class FeatureVersionTest {
     @Test
     public void testFeatureVersion() throws Exception {
         Assert.assertEquals(expectedVersion,
-                new GitFlowVersionInfo(version).featureVersion(featureName));
+                new GitFlowVersionInfo(version, null).featureVersion(featureName));
     }
 }

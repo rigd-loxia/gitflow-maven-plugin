@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2021 Aleksandr Mashchenko.
+ * Copyright 2014-2023 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,7 +82,7 @@ public class GitFlowFeatureStartMojo extends AbstractGitFlowMojo {
 
             // fetch and check remote
             if (fetchRemote) {
-                gitFetchRemoteAndCompare(gitFlowConfig.getDevelopmentBranch());
+                gitFetchRemoteAndCompareCreate(gitFlowConfig.getDevelopmentBranch());
             }
 
             String featureBranchName = null;
@@ -110,7 +110,7 @@ public class GitFlowFeatureStartMojo extends AbstractGitFlowMojo {
 
             featureBranchName = StringUtils.deleteWhitespace(featureBranchName);
 
-            // git for-each-ref refs/heads/feature/...
+            // check branch exists
             final boolean featureBranchExists = gitCheckBranchExists(
                     gitFlowConfig.getFeatureBranchPrefix() + featureBranchName);
 
@@ -128,36 +128,28 @@ public class GitFlowFeatureStartMojo extends AbstractGitFlowMojo {
                 // get current project version from pom
                 final String currentVersion = getCurrentProjectVersion();
 
-                final String version = new GitFlowVersionInfo(currentVersion)
+                final String version = new GitFlowVersionInfo(currentVersion, getVersionPolicy())
                         .featureVersion(featureBranchName);
 
                 if (StringUtils.isNotBlank(version)) {
-                    // mvn versions:set -DnewVersion=...
-                    // -DgenerateBackupPoms=false
                     mvnSetVersions(version);
 
-                    Map<String, String> properties = new HashMap<String, String>();
+                    Map<String, String> properties = new HashMap<>();
                     properties.put("version", version);
                     properties.put("featureName", featureBranchName);
 
-                    // git commit -a -m updating versions for feature branch
-                    gitCommit(commitMessages.getFeatureStartMessage(),
-                            properties);
+                    gitCommit(commitMessages.getFeatureStartMessage(), properties);
                 }
             }
 
             if (installProject) {
-                // mvn clean install
                 mvnCleanInstall();
             }
 
             if (pushRemote) {
-                gitPush(gitFlowConfig.getFeatureBranchPrefix()
-                        + featureBranchName, false);
+                gitPush(gitFlowConfig.getFeatureBranchPrefix() + featureBranchName, false);
             }
-        } catch (CommandLineException e) {
-            throw new MojoFailureException("feature-start", e);
-        } catch (VersionParseException e) {
+        } catch (CommandLineException | VersionParseException e) {
             throw new MojoFailureException("feature-start", e);
         }
     }

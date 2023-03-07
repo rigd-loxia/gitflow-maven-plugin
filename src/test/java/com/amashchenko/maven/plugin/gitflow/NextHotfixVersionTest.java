@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2021 Aleksandr Mashchenko.
+ * Copyright 2014-2023 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,6 +63,6 @@ public class NextHotfixVersionTest {
 
     @Test
     public void testNextSnapshotVersion() throws Exception {
-        Assert.assertEquals(expectedVersion, new GitFlowVersionInfo(version).hotfixVersion(false, index));
+        Assert.assertEquals(expectedVersion, new GitFlowVersionInfo(version, null).hotfixVersion(false, index));
     }
 }

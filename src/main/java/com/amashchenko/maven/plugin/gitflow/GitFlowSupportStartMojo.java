@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2021 Aleksandr Mashchenko.
+ * Copyright 2014-2023 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -91,8 +91,7 @@ public class GitFlowSupportStartMojo extends AbstractGitFlowMojo {
                 }
 
                 try {
-                    tag = prompter.prompt("Choose tag to start support branch",
-                            Arrays.asList(tagsStr.split("\\r?\\n")));
+                    tag = prompter.prompt("Choose tag to start support branch", Arrays.asList(tagsStr.split("\\r?\\n")));
                 } catch (PrompterException e) {
                     throw new MojoFailureException("support-start", e);
                 }
@@ -116,7 +115,7 @@ public class GitFlowSupportStartMojo extends AbstractGitFlowMojo {
                 branchName = supportBranchName;
             }
 
-            // git for-each-ref refs/heads/support/...
+            // check branch exists
             final boolean supportBranchExists = gitCheckBranchExists(gitFlowConfig.getSupportBranchPrefix() + branchName);
 
             if (supportBranchExists) {
@@ -133,7 +132,7 @@ public class GitFlowSupportStartMojo extends AbstractGitFlowMojo {
                     
                     mvnSetVersions(version);
 
-                    Map<String, String> properties = new HashMap<String, String>();
+                    Map<String, String> properties = new HashMap<>();
                     properties.put("version", version);
 
                     gitCommit(commitMessages.getSupportStartMessage(), properties);
@@ -141,7 +140,6 @@ public class GitFlowSupportStartMojo extends AbstractGitFlowMojo {
             }
 
             if (installProject) {
-                // mvn clean install
                 mvnCleanInstall();
             }
 

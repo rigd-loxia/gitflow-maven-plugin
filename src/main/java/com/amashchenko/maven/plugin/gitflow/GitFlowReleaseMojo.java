@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2021 Aleksandr Mashchenko.
+ * Copyright 2014-2023 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -155,6 +155,17 @@ public class GitFlowReleaseMojo extends AbstractGitFlowMojo {
     @Parameter(property = "skipReleaseMergeProdBranch", defaultValue = "false")
     private boolean skipReleaseMergeProdBranch = false;
 
+    /**
+     * Controls which branch is merged to development branch. If set to
+     * <code>true</code> then merge will be skipped. If set to <code>false</code>
+     * and tag is present ({@link #skipTag} is set to <code>false</code>) then tag
+     * will be merged. If there is no tag then production branch will be merged to
+     * development branch.
+     *
+     */
+    @Parameter(property = "noBackMerge", defaultValue = "false")
+    private boolean noBackMerge = false;
+
     /** {@inheritDoc} */
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
@@ -167,35 +178,21 @@ public class GitFlowReleaseMojo extends AbstractGitFlowMojo {
             // check uncommitted changes
             checkUncommittedChanges();
 
-            // git for-each-ref --count=1 refs/heads/release/*
-            final String releaseBranch = gitFindBranches(
-                    gitFlowConfig.getReleaseBranchPrefix(), true);
+            final String releaseBranch = gitFindBranches(gitFlowConfig.getReleaseBranchPrefix(), true);
 
             if (StringUtils.isNotBlank(releaseBranch)) {
-                throw new MojoFailureException(
-                        "Release branch already exists. Cannot start release.");
+                throw new MojoFailureException("Release branch already exists. Cannot start release.");
             }
 
             if (fetchRemote) {
-                // checkout from remote if doesn't exist
-                gitFetchRemoteAndCreate(gitFlowConfig.getDevelopmentBranch());
-
-                // fetch and check remote
-                gitFetchRemoteAndCompare(gitFlowConfig.getDevelopmentBranch());
+                gitFetchRemoteAndCompareCreate(gitFlowConfig.getDevelopmentBranch());
 
                 if (notSameProdDevName()) {
-                    // checkout from remote if doesn't exist
-                    gitFetchRemoteAndCreate(gitFlowConfig.getProductionBranch());
-
-                    // fetch and check remote
-                    gitFetchRemoteAndCompare(gitFlowConfig
-                            .getProductionBranch());
+                    gitFetchRemoteAndCompareCreate(gitFlowConfig.getProductionBranch());
                 }
             }
 
-            // need to be in develop to check snapshots and to get correct
-            // project version
-            // git checkout develop
+            // need to be in develop to check snapshots and to get correct project version
             gitCheckout(gitFlowConfig.getDevelopmentBranch());
 
             // check snapshots dependencies
@@ -204,7 +201,6 @@ public class GitFlowReleaseMojo extends AbstractGitFlowMojo {
             }
 
             if (!skipTestProject) {
-                // mvn clean test
                 mvnCleanTest();
             }
 
@@ -216,21 +212,19 @@ public class GitFlowReleaseMojo extends AbstractGitFlowMojo {
                 defaultVersion = currentVersion;
             } else {
                 // get default release version
-                defaultVersion = new GitFlowVersionInfo(currentVersion)
+                defaultVersion = new GitFlowVersionInfo(currentVersion, getVersionPolicy())
                         .getReleaseVersionString();
             }
 
             if (defaultVersion == null) {
-                throw new MojoFailureException(
-                        "Cannot get default project version.");
+                throw new MojoFailureException("Cannot get default project version.");
             }
 
             String version = null;
             if (settings.isInteractiveMode()) {
                 try {
                     while (version == null) {
-                        version = prompter.prompt("What is release version? ["
-                                + defaultVersion + "]");
+                        version = prompter.prompt("What is release version? [" + defaultVersion + "]");
 
                         if (!"".equals(version)
                                 && (!GitFlowVersionInfo.isValidVersion(version) || !validBranchName(version))) {
@@ -255,12 +249,11 @@ public class GitFlowReleaseMojo extends AbstractGitFlowMojo {
                 mvnRun(preReleaseGoals);
             }
 
-            Map<String, String> messageProperties = new HashMap<String, String>();
+            Map<String, String> messageProperties = new HashMap<>();
             messageProperties.put("version", version);
 
             // execute if version changed
             if (!version.equals(currentVersion)) {
-                // mvn set version
                 mvnSetVersions(version);
 
                 // git commit -a -m updating versions for release
@@ -268,7 +261,7 @@ public class GitFlowReleaseMojo extends AbstractGitFlowMojo {
             }
 
             if (!skipReleaseMergeProdBranch && notSameProdDevName()) {
-                // git checkout master
+                // git checkout production
                 gitCheckout(gitFlowConfig.getProductionBranch());
 
                 gitMerge(gitFlowConfig.getDevelopmentBranch(), releaseRebase,
@@ -296,26 +289,35 @@ public class GitFlowReleaseMojo extends AbstractGitFlowMojo {
             if (notSameProdDevName()) {
                 // git checkout develop
                 gitCheckout(gitFlowConfig.getDevelopmentBranch());
+
+                if (!noBackMerge) {
+                    // merge back to develop
+                    final String refToMerge;
+                    if (!skipTag) {
+                        refToMerge = gitFlowConfig.getVersionTagPrefix() + version;
+                    } else {
+                        refToMerge = gitFlowConfig.getProductionBranch();
+                    }
+                    gitMerge(refToMerge, releaseRebase, releaseMergeNoFF, false, commitMessages.getReleaseFinishDevMergeMessage(),
+                            messageProperties);
+                }
             }
 
             // get next snapshot version
             final String nextSnapshotVersion;
-            if (!settings.isInteractiveMode()
-                    && StringUtils.isNotBlank(developmentVersion)) {
+            if (!settings.isInteractiveMode() && StringUtils.isNotBlank(developmentVersion)) {
                 nextSnapshotVersion = developmentVersion;
             } else {
-                GitFlowVersionInfo versionInfo = new GitFlowVersionInfo(version);
+                GitFlowVersionInfo versionInfo = new GitFlowVersionInfo(version, getVersionPolicy());
                 if (digitsOnlyDevVersion) {
                     versionInfo = versionInfo.digitsVersionInfo();
                 }
 
-                nextSnapshotVersion = versionInfo
-                        .nextSnapshotVersion(versionDigitToIncrement);
+                nextSnapshotVersion = versionInfo.nextSnapshotVersion(versionDigitToIncrement);
             }
 
             if (StringUtils.isBlank(nextSnapshotVersion)) {
-                throw new MojoFailureException(
-                        "Next snapshot version is blank.");
+                throw new MojoFailureException("Next snapshot version is blank.");
             }
 
             // mvn set version
@@ -327,7 +329,6 @@ public class GitFlowReleaseMojo extends AbstractGitFlowMojo {
             gitCommit(commitMessages.getReleaseFinishMessage(), messageProperties);
 
             if (installProject) {
-                // mvn clean install
                 mvnCleanInstall();
             }
 

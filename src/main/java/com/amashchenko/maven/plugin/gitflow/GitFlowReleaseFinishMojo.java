@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2021 Aleksandr Mashchenko.
+ * Copyright 2014-2023 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -167,6 +167,18 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
     @Parameter(property = "skipReleaseMergeProdBranch", defaultValue = "false")
     private boolean skipReleaseMergeProdBranch = false;
 
+    /**
+     * Controls which branch is merged to development branch. If set to
+     * <code>true</code> then release branch will be merged to development branch.
+     * If set to <code>false</code> and tag is present ({@link #skipTag} is set to
+     * <code>false</code>) then tag will be merged. If there is no tag then
+     * production branch will be merged to development branch.
+     *
+     * @since 1.18.0
+     */
+    @Parameter(property = "noBackMerge", defaultValue = "false")
+    private boolean noBackMerge = false;
+
     /** {@inheritDoc} */
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
@@ -176,13 +188,11 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
             // check uncommitted changes
             checkUncommittedChanges();
 
-            // git for-each-ref --format='%(refname:short)' refs/heads/release/*
-            String releaseBranch = gitFindBranches(gitFlowConfig.getReleaseBranchPrefix(), false).trim();
+            String releaseBranch = gitFindBranches(gitFlowConfig.getReleaseBranchPrefix(), false);
 
             if (StringUtils.isBlank(releaseBranch)) {
                 if (fetchRemote) {
-                    releaseBranch = gitFetchAndFindRemoteBranches(gitFlowConfig.getOrigin(),
-                            gitFlowConfig.getReleaseBranchPrefix(), false).trim();
+                    releaseBranch = gitFetchAndFindRemoteBranches(gitFlowConfig.getReleaseBranchPrefix(), false);
                     if (StringUtils.isBlank(releaseBranch)) {
                         throw new MojoFailureException("There is no remote or local release branch.");
                     }
@@ -191,8 +201,7 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
                     releaseBranch = releaseBranch.substring(gitFlowConfig.getOrigin().length() + 1);
 
                     if (StringUtils.countMatches(releaseBranch, gitFlowConfig.getReleaseBranchPrefix()) > 1) {
-                        throw new MojoFailureException(
-                                "More than one remote release branch exists. Cannot finish release.");
+                        throw new MojoFailureException("More than one remote release branch exists. Cannot finish release.");
                     }
 
                     gitCreateAndCheckout(releaseBranch, gitFlowConfig.getOrigin() + "/" + releaseBranch);
@@ -201,8 +210,7 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
                 }
             }
             if (StringUtils.countMatches(releaseBranch, gitFlowConfig.getReleaseBranchPrefix()) > 1) {
-                throw new MojoFailureException(
-                        "More than one release branch exists. Cannot finish release.");
+                throw new MojoFailureException("More than one release branch exists. Cannot finish release.");
             }
 
             // check snapshots dependencies
@@ -213,22 +221,12 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
             }
 
             if (fetchRemote) {
-                // fetch and check remote
-                gitFetchRemoteAndCompare(releaseBranch);
+                gitFetchRemoteAndCompareCreate(releaseBranch);
 
-                // checkout from remote if doesn't exist
-                gitFetchRemoteAndCreate(gitFlowConfig.getDevelopmentBranch());
-
-                // fetch and check remote
-                gitFetchRemoteAndCompare(gitFlowConfig.getDevelopmentBranch());
+                gitFetchRemoteAndCompareCreate(gitFlowConfig.getDevelopmentBranch());
 
                 if (notSameProdDevName()) {
-                    // checkout from remote if doesn't exist
-                    gitFetchRemoteAndCreate(gitFlowConfig.getProductionBranch());
-
-                    // fetch and check remote
-                    gitFetchRemoteAndCompare(gitFlowConfig
-                            .getProductionBranch());
+                    gitFetchRemoteAndCompareCreate(gitFlowConfig.getProductionBranch());
                 }
             }
 
@@ -236,7 +234,6 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
             gitCheckout(releaseBranch);
 
             if (!skipTestProject) {
-                // mvn clean test
                 mvnCleanTest();
             }
 
@@ -247,7 +244,7 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
 
             String currentReleaseVersion = getCurrentProjectVersion();
 
-            Map<String, String> messageProperties = new HashMap<String, String>();
+            Map<String, String> messageProperties = new HashMap<>();
             messageProperties.put("version", currentReleaseVersion);
 
             if (useSnapshotInRelease && ArtifactUtils.isSnapshot(currentReleaseVersion)) {
@@ -261,7 +258,7 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
             }
 
             if (!skipReleaseMergeProdBranch) {
-                // git checkout master
+                // git checkout production
                 gitCheckout(gitFlowConfig.getProductionBranch());
 
                 gitMerge(releaseBranch, releaseRebase, releaseMergeNoFF, releaseMergeFFOnly, commitMessages.getReleaseFinishMergeMessage(),
@@ -271,13 +268,10 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
             // get current project version from pom
             final String currentVersion = getCurrentProjectVersion();
 
+            final String tagVersion = (tychoBuild || useSnapshotInRelease) && ArtifactUtils.isSnapshot(currentVersion)
+                    ? currentVersion.replace("-" + Artifact.SNAPSHOT_VERSION, "")
+                    : currentVersion;
             if (!skipTag) {
-                String tagVersion = currentVersion;
-                if ((tychoBuild || useSnapshotInRelease) && ArtifactUtils.isSnapshot(currentVersion)) {
-                    tagVersion = currentVersion.replace("-"
-                            + Artifact.SNAPSHOT_VERSION, "");
-                }
-
                 messageProperties.put("version", tagVersion);
 
                 // git tag -a ...
@@ -297,15 +291,22 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
                 // get develop version
                 final String developReleaseVersion = getCurrentProjectVersion();
                 if (commitDevelopmentVersionAtStart && useSnapshotInRelease) {
-                    // updating develop poms to master version to avoid merge conflicts
+                    // updating develop poms to production version to avoid merge conflicts
                     mvnSetVersions(currentVersion);
 
                     // commit the changes
                     gitCommit(commitMessages.getUpdateDevToAvoidConflictsMessage());
                 }
 
-                // merge branch master into develop
-                gitMerge(releaseBranch, releaseRebase, releaseMergeNoFF, false,
+                final String refToMerge;
+                if (noBackMerge) {
+                    refToMerge = releaseBranch;
+                } else if (!skipTag) {
+                    refToMerge = gitFlowConfig.getVersionTagPrefix() + tagVersion;
+                } else {
+                    refToMerge = gitFlowConfig.getProductionBranch();
+                }
+                gitMerge(refToMerge, releaseRebase, releaseMergeNoFF, false,
                         commitMessages.getReleaseFinishDevMergeMessage(), messageProperties);
 
                 if (commitDevelopmentVersionAtStart && useSnapshotInRelease) {
@@ -327,12 +328,10 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
             if (!commitDevelopmentVersionAtStart) {
                 // get next snapshot version
                 final String nextSnapshotVersion;
-                if (!settings.isInteractiveMode()
-                        && StringUtils.isNotBlank(developmentVersion)) {
+                if (!settings.isInteractiveMode() && StringUtils.isNotBlank(developmentVersion)) {
                     nextSnapshotVersion = developmentVersion;
                 } else {
-                    GitFlowVersionInfo versionInfo = new GitFlowVersionInfo(
-                            currentVersion);
+                    GitFlowVersionInfo versionInfo = new GitFlowVersionInfo(currentVersion, getVersionPolicy());
                     if (digitsOnlyDevVersion) {
                         versionInfo = versionInfo.digitsVersionInfo();
                     }
@@ -342,21 +341,17 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
                 }
 
                 if (StringUtils.isBlank(nextSnapshotVersion)) {
-                    throw new MojoFailureException(
-                            "Next snapshot version is blank.");
+                    throw new MojoFailureException("Next snapshot version is blank.");
                 }
 
-                // mvn versions:set -DnewVersion=... -DgenerateBackupPoms=false
                 mvnSetVersions(nextSnapshotVersion);
 
                 messageProperties.put("version", nextSnapshotVersion);
 
-                // git commit -a -m updating for next development version
                 gitCommit(commitMessages.getReleaseFinishMessage(), messageProperties);
             }
 
             if (installProject) {
-                // mvn clean install
                 mvnCleanInstall();
             }
 
@@ -372,7 +367,6 @@ public class GitFlowReleaseFinishMojo extends AbstractGitFlowMojo {
             }
 
             if (!keepBranch) {
-                // git branch -d release/...
                 gitBranchDelete(releaseBranch);
             }
         } catch (Exception e) {

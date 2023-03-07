@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2021 Aleksandr Mashchenko.
+ * Copyright 2014-2023 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,6 +74,7 @@ public class GitFlowHotfixStartMojo extends AbstractGitFlowMojo {
     /**
      * Which digit to increment in the next hotfix version. Starts from zero.
      *
+     * @since 1.17.0
      */
     @Parameter(property = "hotfixVersionDigitToIncrement")
     private Integer hotfixVersionDigitToIncrement;
@@ -109,12 +110,10 @@ public class GitFlowHotfixStartMojo extends AbstractGitFlowMojo {
                         branches[i] = supportBranches[i];
                     }
                     // add production branch to the list
-                    branches[supportBranches.length] = gitFlowConfig
-                            .getProductionBranch();
+                    branches[supportBranches.length] = gitFlowConfig.getProductionBranch();
 
-                    List<String> numberedList = new ArrayList<String>();
-                    StringBuilder str = new StringBuilder("Branches:")
-                            .append(LS);
+                    List<String> numberedList = new ArrayList<>();
+                    StringBuilder str = new StringBuilder("Branches:").append(LS);
                     for (int i = 0; i < branches.length; i++) {
                         str.append((i + 1) + ". " + branches[i] + LS);
                         numberedList.add(String.valueOf(i + 1));
@@ -124,8 +123,7 @@ public class GitFlowHotfixStartMojo extends AbstractGitFlowMojo {
                     String branchNumber = null;
                     try {
                         while (StringUtils.isBlank(branchNumber)) {
-                            branchNumber = prompter.prompt(str.toString(),
-                                    numberedList);
+                            branchNumber = prompter.prompt(str.toString(), numberedList);
                         }
                     } catch (PrompterException e) {
                         throw new MojoFailureException("hotfix-start", e);
@@ -148,37 +146,32 @@ public class GitFlowHotfixStartMojo extends AbstractGitFlowMojo {
                 }
             }
 
-            // need to be in master to get correct project version
-            // git checkout master
+            // need to be in the correct branch to get correct project version
             gitCheckout(branchName);
 
             // fetch and check remote
             if (fetchRemote) {
-                gitFetchRemoteAndCompare(branchName);
+                gitFetchRemoteAndCompareCreate(branchName);
             }
 
             // get current project version from pom
             final String currentVersion = getCurrentProjectVersion();
 
             // get default hotfix version
-            final String defaultVersion = new GitFlowVersionInfo(currentVersion).hotfixVersion(tychoBuild, hotfixVersionDigitToIncrement);
+            final String defaultVersion = new GitFlowVersionInfo(currentVersion, getVersionPolicy()).hotfixVersion(tychoBuild,
+                    hotfixVersionDigitToIncrement);
 
             if (defaultVersion == null) {
-                throw new MojoFailureException(
-                        "Cannot get default project version.");
+                throw new MojoFailureException("Cannot get default next version.");
             }
 
             String version = null;
             if (settings.isInteractiveMode()) {
                 try {
                     while (version == null) {
-                        version = prompter
-                                .prompt("What is the hotfix version? ["
-                                        + defaultVersion + "]");
+                        version = prompter.prompt("What is the hotfix version? [" + defaultVersion + "]");
 
-                        if (!"".equals(version)
-                                && (!GitFlowVersionInfo.isValidVersion(version)
-                                        || !validBranchName(version))) {
+                        if (!"".equals(version) && (!GitFlowVersionInfo.isValidVersion(version) || !validBranchName(version))) {
                             getLog().info("The version is not valid.");
                             version = null;
                         }
@@ -188,10 +181,8 @@ public class GitFlowHotfixStartMojo extends AbstractGitFlowMojo {
                 }
             } else {
                 if (StringUtils.isNotBlank(hotfixVersion)
-                        && (!GitFlowVersionInfo.isValidVersion(hotfixVersion)
-                                || !validBranchName(hotfixVersion))) {
-                    throw new MojoFailureException("The hotfix version '"
-                            + hotfixVersion + "' is not valid.");
+                        && (!GitFlowVersionInfo.isValidVersion(hotfixVersion) || !validBranchName(hotfixVersion))) {
+                    throw new MojoFailureException("The hotfix version '" + hotfixVersion + "' is not valid.");
                 } else {
                     version = hotfixVersion;
                 }
@@ -205,23 +196,19 @@ public class GitFlowHotfixStartMojo extends AbstractGitFlowMojo {
             // to finish hotfix on support branch
             String branchVersionPart = version.replace('/', '_');
 
-            String hotfixBranchName = gitFlowConfig.getHotfixBranchPrefix()
-                    + branchVersionPart;
+            String hotfixBranchName = gitFlowConfig.getHotfixBranchPrefix() + branchVersionPart;
             if (!gitFlowConfig.getProductionBranch().equals(branchName)) {
-                hotfixBranchName = gitFlowConfig.getHotfixBranchPrefix()
-                        + branchName + "/" + branchVersionPart;
+                hotfixBranchName = gitFlowConfig.getHotfixBranchPrefix() + branchName + "/" + branchVersionPart;
             }
 
             // git for-each-ref refs/heads/hotfix/...
-            final boolean hotfixBranchExists = gitCheckBranchExists(
-                    hotfixBranchName);
+            final boolean hotfixBranchExists = gitCheckBranchExists(hotfixBranchName);
 
             if (hotfixBranchExists) {
-                throw new MojoFailureException(
-                        "Hotfix branch with that name already exists. Cannot start hotfix.");
+                throw new MojoFailureException("Hotfix branch with that name already exists. Cannot start hotfix.");
             }
 
-            // git checkout -b hotfix/... master
+            // git checkout -b hotfix/... ...
             gitCreateAndCheckout(hotfixBranchName, branchName);
 
             // execute if version changed
@@ -238,27 +225,22 @@ public class GitFlowHotfixStartMojo extends AbstractGitFlowMojo {
                                     + " It is better to define it in the project's pom file.");
                 }
 
-                // mvn versions:set -DnewVersion=... -DgenerateBackupPoms=false
                 mvnSetVersions(projectVersion);
 
-                Map<String, String> properties = new HashMap<String, String>();
+                Map<String, String> properties = new HashMap<>();
                 properties.put("version", projectVersion);
 
-                // git commit -a -m updating versions for hotfix
                 gitCommit(commitMessages.getHotfixStartMessage(), properties);
             }
 
             if (installProject) {
-                // mvn clean install
                 mvnCleanInstall();
             }
 
             if (pushRemote) {
                 gitPush(hotfixBranchName, false);
             }
-        } catch (CommandLineException e) {
-            throw new MojoFailureException("hotfix-start", e);
-        } catch (VersionParseException e) {
+        } catch (CommandLineException | VersionParseException e) {
             throw new MojoFailureException("hotfix-start", e);
         }
     }

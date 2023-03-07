@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2021 Aleksandr Mashchenko.
+ * Copyright 2014-2023 Aleksandr Mashchenko.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -128,6 +128,18 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
     @Parameter(property = "skipMergeDevBranch", defaultValue = "false")
     private boolean skipMergeDevBranch = false;
 
+    /**
+     * Controls which branch is merged to development branch. If set to
+     * <code>true</code> then hotfix branch will be merged to development branch. If
+     * set to <code>false</code> and tag is present ({@link #skipTag} is set to
+     * <code>false</code>) then tag will be merged. If there is no tag then
+     * production branch will be merged to development branch.
+     *
+     * @since 1.18.0
+     */
+    @Parameter(property = "noBackMergeHotfix", defaultValue = "false")
+    private boolean noBackMergeHotfix = false;
+
     /** {@inheritDoc} */
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
@@ -157,37 +169,43 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
             }
 
             if (StringUtils.isBlank(hotfixBranchName)) {
-                throw new MojoFailureException(
-                        "Hotfix branch name to finish is blank.");
+                throw new MojoFailureException("Hotfix branch name to finish is blank.");
             }
 
             // support branch hotfix
             String supportBranchName = null;
             boolean supportHotfix = hotfixBranchName
-                    .startsWith(gitFlowConfig.getHotfixBranchPrefix()
-                            + gitFlowConfig.getSupportBranchPrefix());
+                    .startsWith(gitFlowConfig.getHotfixBranchPrefix() + gitFlowConfig.getSupportBranchPrefix());
             // get support branch name w/o version part
             if (supportHotfix) {
-                supportBranchName = hotfixBranchName.substring(
-                        gitFlowConfig.getHotfixBranchPrefix().length());
-                supportBranchName = supportBranchName.substring(0,
-                        supportBranchName.lastIndexOf('/'));
+                supportBranchName = hotfixBranchName.substring(gitFlowConfig.getHotfixBranchPrefix().length());
+                supportBranchName = supportBranchName.substring(0, supportBranchName.lastIndexOf('/'));
             }
 
             // fetch and check remote
             if (fetchRemote) {
-                gitFetchRemoteAndCompare(hotfixBranchName);
+                gitFetchRemoteAndCompareCreate(hotfixBranchName);
 
                 if (supportBranchName != null) {
-                    gitFetchRemoteAndCreate(supportBranchName);
-                    gitFetchRemoteAndCompare(supportBranchName);
+                    gitFetchRemoteAndCompareCreate(supportBranchName);
                 } else {
                     if (notSameProdDevName()) {
-                        gitFetchRemoteAndCreate(gitFlowConfig.getDevelopmentBranch());
-                        gitFetchRemoteAndCompare(gitFlowConfig.getDevelopmentBranch());
+                        gitFetchRemoteAndCompareCreate(gitFlowConfig.getDevelopmentBranch());
                     }
-                    gitFetchRemoteAndCreate(gitFlowConfig.getProductionBranch());
-                    gitFetchRemoteAndCompare(gitFlowConfig.getProductionBranch());
+                    gitFetchRemoteAndCompareCreate(gitFlowConfig.getProductionBranch());
+
+                    // release branch
+                    String remoteReleases = gitFetchAndFindRemoteBranches(gitFlowConfig.getReleaseBranchPrefix(), false);
+                    if (StringUtils.isNotBlank(remoteReleases)) {
+                        // remove remote name with slash from branch name
+                        String remoteRelease = remoteReleases.substring(gitFlowConfig.getOrigin().length() + 1);
+
+                        if (StringUtils.countMatches(remoteRelease, gitFlowConfig.getReleaseBranchPrefix()) > 1) {
+                            throw new MojoFailureException("More than one remote release branch exists. Cannot finish hotfix.");
+                        }
+
+                        gitCreateBranch(remoteRelease, remoteReleases);
+                    }
                 }
             }
 
@@ -195,7 +213,6 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
             gitCheckout(hotfixBranchName);
 
             if (!skipTestProject) {
-                // mvn clean test
                 mvnCleanTest();
             }
 
@@ -206,7 +223,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
             String currentHotfixVersion = getCurrentProjectVersion();
 
-            Map<String, String> messageProperties = new HashMap<String, String>();
+            Map<String, String> messageProperties = new HashMap<>();
             messageProperties.put("version", currentHotfixVersion);
 
             if (useSnapshotInHotfix && ArtifactUtils.isSnapshot(currentHotfixVersion)) {
@@ -224,7 +241,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
                 // git merge --no-ff hotfix/...
                 gitMergeNoff(hotfixBranchName, commitMessages.getHotfixFinishSupportMergeMessage(), messageProperties);
             } else if (!skipMergeProdBranch) {
-                // git checkout master
+                // git checkout production
                 gitCheckout(gitFlowConfig.getProductionBranch());
                 // git merge --no-ff hotfix/...
                 gitMergeNoff(hotfixBranchName, commitMessages.getHotfixFinishMergeMessage(), messageProperties);
@@ -232,14 +249,11 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
             final String currentVersion = getCurrentProjectVersion();
 
+            final String tagVersion = (tychoBuild || useSnapshotInHotfix) && ArtifactUtils.isSnapshot(currentVersion)
+                    ? currentVersion.replace("-" + Artifact.SNAPSHOT_VERSION, "")
+                    : currentVersion;
             if (!skipTag) {
-                String tagVersion = currentVersion;
-                if ((tychoBuild || useSnapshotInHotfix) && ArtifactUtils.isSnapshot(tagVersion)) {
-                    tagVersion = tagVersion
-                            .replace("-" + Artifact.SNAPSHOT_VERSION, "");
-                }
-
-                Map<String, String> properties = new HashMap<String, String>();
+                Map<String, String> properties = new HashMap<>();
                 properties.put("version", tagVersion);
 
                 // git tag -a ...
@@ -258,10 +272,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
             }
 
             // check whether release branch exists
-            // git for-each-ref --count=1 --format="%(refname:short)"
-            // refs/heads/release/*
-            final String releaseBranch = gitFindBranches(
-                    gitFlowConfig.getReleaseBranchPrefix(), true);
+            final String releaseBranch = gitFindBranches(gitFlowConfig.getReleaseBranchPrefix(), true);
 
             if (supportBranchName == null) {
                 // if release branch exists merge hotfix changes into it
@@ -288,12 +299,12 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
                     }
                 } else if (!skipMergeDevBranch) {
                     GitFlowVersionInfo developVersionInfo = new GitFlowVersionInfo(
-                            currentVersion);
+                            currentVersion, getVersionPolicy());
                     if (notSameProdDevName()) {
                         // git checkout develop
                         gitCheckout(gitFlowConfig.getDevelopmentBranch());
 
-                        developVersionInfo = new GitFlowVersionInfo(getCurrentProjectVersion());
+                        developVersionInfo = new GitFlowVersionInfo(getCurrentProjectVersion(), getVersionPolicy());
 
                         // set version to avoid merge conflict
                         mvnSetVersions(currentVersion);
@@ -301,13 +312,19 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
                         messageProperties.put("version", currentVersion);
 
-                        // git merge --no-ff hotfix/...
-                        gitMergeNoff(hotfixBranchName, commitMessages.getHotfixFinishDevMergeMessage(),
-                                messageProperties);
+                        final String refToMerge;
+                        if (skipMergeProdBranch || noBackMergeHotfix) {
+                            refToMerge = hotfixBranchName;
+                        } else if (!skipTag) {
+                            refToMerge = gitFlowConfig.getVersionTagPrefix() + tagVersion;
+                        } else {
+                            refToMerge = gitFlowConfig.getProductionBranch();
+                        }
+                        gitMergeNoff(refToMerge, commitMessages.getHotfixFinishDevMergeMessage(), messageProperties);
 
                         // which version to increment
                         GitFlowVersionInfo hotfixVersionInfo = new GitFlowVersionInfo(
-                                currentVersion);
+                                currentVersion, getVersionPolicy());
                         if (developVersionInfo
                                 .compareTo(hotfixVersionInfo) < 0) {
                             developVersionInfo = hotfixVersionInfo;
@@ -322,21 +339,16 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
                                 "Next snapshot version is blank.");
                     }
 
-                    // mvn versions:set -DnewVersion=...
-                    // -DgenerateBackupPoms=false
                     mvnSetVersions(nextSnapshotVersion);
 
-                    Map<String, String> properties = new HashMap<String, String>();
+                    Map<String, String> properties = new HashMap<>();
                     properties.put("version", nextSnapshotVersion);
 
-                    // git commit -a -m updating for next development version
-                    gitCommit(commitMessages.getHotfixFinishMessage(),
-                            properties);
+                    gitCommit(commitMessages.getHotfixFinishMessage(), properties);
                 }
             }
 
             if (installProject) {
-                // mvn clean install
                 mvnCleanInstall();
             }
 
@@ -354,6 +366,11 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
                     }
                 }
 
+                // push tag
+                if (!skipTag && skipMergeDevBranch && skipMergeProdBranch && StringUtils.isBlank(releaseBranch)) {
+                    gitPush(gitFlowConfig.getVersionTagPrefix() + tagVersion, false);
+                }
+
                 if (!keepBranch) {
                     gitPushDelete(hotfixBranchName);
                 }
@@ -361,7 +378,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
             if (!keepBranch) {
                 if (skipMergeProdBranch) {
-                    //force delete as upstream merge is skipped
+                    // force delete as upstream merge is skipped
                     gitBranchDeleteForce(hotfixBranchName);
                 } else {
                     // git branch -d hotfix/...
@@ -374,7 +391,6 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
     }
 
     private String promptBranchName() throws MojoFailureException, CommandLineException {
-        // git for-each-ref --format='%(refname:short)' refs/heads/hotfix/*
         String hotfixBranches = gitFindBranches(gitFlowConfig.getHotfixBranchPrefix(), false);
 
         // find hotfix support branches
@@ -389,7 +405,7 @@ public class GitFlowHotfixFinishMojo extends AbstractGitFlowMojo {
 
         String[] branches = hotfixBranches.split("\\r?\\n");
 
-        List<String> numberedList = new ArrayList<String>();
+        List<String> numberedList = new ArrayList<>();
         StringBuilder str = new StringBuilder("Hotfix branches:").append(LS);
         for (int i = 0; i < branches.length; i++) {
             str.append((i + 1) + ". " + branches[i] + LS);
