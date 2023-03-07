@@ -36,7 +36,6 @@ import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.SystemUtils;
 import org.apache.maven.artifact.ArtifactUtils;
 import org.apache.maven.execution.MavenSession;
@@ -51,6 +50,7 @@ import org.apache.maven.project.ProjectBuildingResult;
 import org.apache.maven.settings.Settings;
 import org.apache.maven.shared.release.policy.version.VersionPolicy;
 import org.codehaus.plexus.components.interactivity.Prompter;
+import org.codehaus.plexus.util.FileUtils;
 import org.codehaus.plexus.util.Os;
 import org.codehaus.plexus.util.StringUtils;
 import org.codehaus.plexus.util.cli.CommandLineException;
